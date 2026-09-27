@@ -5,14 +5,154 @@
 
 generator client {
   provider = "prisma-client"
-   output   = "../src/generated/prisma"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-model HealthCheck {
-  id        Int      @id @default(autoincrement())
+// ─────────────────────────────────────────────
+// ENUMS
+// Only for values the code reasons about and developers control.
+// Business-managed values (sizes, colors) live in tables.
+// ─────────────────────────────────────────────
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+// ─────────────────────────────────────────────
+// CATALOG
+// ─────────────────────────────────────────────
+
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Category[] @relation("CategoryTree")
+  products  Product[]
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([parentId])
+}
+
+model SizeChart {
+  id        String    @id @default(uuid())
+  name      String
+  unit      String    @default("in")
+  rows      Json
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// Sizes are business data: admins can add "XXL" without a code change.
+model Size {
+  id        String           @id @default(uuid())
+  label     String           @unique
+  sortOrder Int
+  isActive  Boolean          @default(true)
+  variants  ProductVariant[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([sortOrder])
+}
+
+model Product {
+  id             String           @id @default(uuid())
+  name           String
+  slug           String           @unique
+  description    String?
+  status         ProductStatus    @default(DRAFT)
+  categoryId     String
+  category       Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  sizeChartId    String?
+  sizeChart      SizeChart?       @relation(fields: [sizeChartId], references: [id], onDelete: SetNull)
+  hsnCode        String?
+  isMadeToOrder  Boolean          @default(false)
+  seoTitle       String?
+  seoDescription String?
+  colors         ProductColor[]
+  variants       ProductVariant[]
+  images         ProductImage[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  // Category page: WHERE categoryId AND status ORDER BY createdAt DESC
+  @@index([categoryId, status, createdAt(sort: Desc)])
+}
+
+// Single source of truth for a product's colors.
+model ProductColor {
+  id        String           @id @default(uuid())
+  productId String
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  name      String
+  hex       String?
+  sortOrder Int              @default(0)
+  isActive  Boolean          @default(true)
+  variants  ProductVariant[]
+  images    ProductImage[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([productId, name])
+  @@unique([id, productId]) // lets variants reference (color, product) as a pair
+}
+
+model ProductVariant {
+  id  String @id @default(uuid())
+  sku String @unique
+  gsm Int
+
+  productId String
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  colorId   String
+  // Composite FK: the color must belong to this same product.
+  color     ProductColor @relation(fields: [colorId, productId], references: [id, productId], onDelete: Restrict)
+  sizeId    String
+  size      Size         @relation(fields: [sizeId], references: [id], onDelete: Restrict)
+
+  // Money in paise (₹499.50 → 49950). Never Float.
+  pricePaise          Int
+  compareAtPricePaise Int?
+
+  // Decrement only with an atomic conditional update.
+  // CHECK (stock >= 0) is added in the migration SQL.
+  stock             Int @default(0)
+  lowStockThreshold Int @default(5)
+
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, sizeId, colorId, gsm])
+  @@index([colorId])
+  @@index([sizeId])
+}
+
+model ProductImage {
+  id        String        @id @default(uuid())
+  productId String
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Optional color tag. That it belongs to the same product is checked in code.
+  colorId   String?
+  color     ProductColor? @relation(fields: [colorId], references: [id], onDelete: SetNull)
+  url       String
+  altText   String?
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  // Deleting a row doesn't delete the file in storage; the code must do that too.
+  @@index([productId, sortOrder])
+  @@index([colorId])
 }
