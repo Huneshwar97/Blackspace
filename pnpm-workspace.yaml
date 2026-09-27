@@ -1,0 +1,12 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+allowBuilds:
+  '@parcel/watcher': true
+  unrs-resolver: true
+  sharp: true
+  esbuild: true
+  msgpackr-extract: true
+  workerd: true
+  '@prisma/engines': true
+  prisma: true
